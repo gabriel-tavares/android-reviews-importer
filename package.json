@@ -1,11 +1,17 @@
 {
   "name": "android-reviews-importer",
-  "version": "1.0.0",
+  "version": "1.0.1",
+  "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
-    "google-play-scraper": "^10.4.0",
-    "axios": "^1.7.2",
+    "google-play-scraper": "10.2.0",
+    "axios": "^1.7.4",
     "dotenv": "^16.4.5"
+  },
+  "scripts": {
+    "start": "node index.mjs"
   }
 }
-
