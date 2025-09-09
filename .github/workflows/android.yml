@@ -1,20 +1,42 @@
-name: Android Reviews Import
+name: Android Reviews Import - main
+
 on:
-  schedule:
-    - cron: '35 * * * *'
   workflow_dispatch:
+  schedule:
+   - cron: '35 * * * *'
+
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
-      - run: npm ci
-      - run: node index.mjs
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies (lock-aware)
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            corepack enable
+            pnpm install --frozen-lockfile=false
+          elif [ -f yarn.lock ]; then
+            corepack enable
+            yarn install --frozen-lockfile
+          elif [ -f package-lock.json ]; then
+            npm ci
+          else
+            echo "No lockfile found. Running npm install..."
+            npm install
+          fi
+
+      - name: Run importer
         env:
-          ANDROID_APP_ID: br.com.icatuseguros.appicatu
-          WORKER_IMPORT_URL: ${{ secrets.WORKER_IMPORT_URL }}  # .../api/import/android
+          ANDROID_APP_ID: ${{ secrets.ANDROID_APP_ID }}
+          WORKER_URL: ${{ secrets.WORKER_URL }}
           IMPORT_TOKEN: ${{ secrets.IMPORT_TOKEN }}
+        run: |
+          node index.mjs
