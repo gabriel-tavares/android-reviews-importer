@@ -31,7 +31,9 @@ async function collectAndroid(appId, pages=1){
       sort: gplay.sort.NEWEST,
       num: 200,
       paginate: true,
-      nextPaginationToken: token
+      nextPaginationToken: token,
+      lang: 'pt',     
+      country: 'br'   
     });
     token = res.nextPaginationToken;
     for (const r of res.data){
@@ -77,3 +79,4 @@ async function run(){
 }
 
 run().catch(err => { console.error(err?.response?.data || err.message || err); process.exit(1); });
+
