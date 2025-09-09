@@ -2,19 +2,26 @@ import 'dotenv/config';
 import gplay from 'google-play-scraper';
 import axios from 'axios';
 
-const APP_ID  = process.env.ANDROID_APP_ID;
-const BASE    = (process.env.WORKER_URL || '').replace(/\/$/, '');
-const FULL    = (process.env.WORKER_IMPORT_URL || '').replace(/\/$/, '');
+function normalizeBase(u) {
+  if (!u) return '';
+  let s = String(u).trim().replace(/\/+$/, '');
+  if (/^https?:\/\//i.test(s)) return s;
+  if (/^\/\//.test(s)) return 'https:' + s;
+  return 'https://' + s.replace(/^\/+/, '');
+}
 
-// Se WORKER_IMPORT_URL vier completo, usa ele. Senão, monta a partir de WORKER_URL.
+const APP_ID  = process.env.ANDROID_APP_ID;
+const BASE    = normalizeBase(process.env.WORKER_URL || '');
+const FULL    = normalizeBase(process.env.WORKER_IMPORT_URL || '');
 const IMPORT_URL = FULL || (BASE ? (BASE + '/api/import/android') : '');
 
 const TOKEN   = process.env.IMPORT_TOKEN;
 const PAGES   = Number(process.env.ANDROID_PAGES || 2);
-const LANG    = process.env.LANG || 'pt_BR';
+const LANG    = process.env.LANG || 'pt';
 const COUNTRY = (process.env.COUNTRY || 'br').toLowerCase();
 
 function toIso(d){ try { return d ? new Date(d).toISOString() : null } catch { return null; } }
+function mask(u){ return u ? u.replace(/^(https?):\/\/([^/]+)/i, (_m, p1) => `${p1}://***`) : u; }
 
 if (!APP_ID || !IMPORT_URL || !TOKEN) {
   console.error('Faltam variáveis ANDROID_APP_ID / WORKER_IMPORT_URL ou WORKER_URL / IMPORT_TOKEN');
@@ -32,8 +39,8 @@ async function collectAndroid(appId, pages=1){
       num: 200,
       paginate: true,
       nextPaginationToken: token,
-      lang: 'pt',     
-      country: 'br'   
+      lang: LANG,
+      country: COUNTRY.toUpperCase()
     });
     token = res.nextPaginationToken;
     for (const r of res.data){
@@ -67,7 +74,7 @@ async function collectAndroid(appId, pages=1){
 }
 
 async function run(){
-  console.log('Config:', { APP_ID, IMPORT_URL: IMPORT_URL.replace(/https?:\/\//,'https://***'), PAGES, LANG, COUNTRY });
+  console.log('Config:', { APP_ID, IMPORT_URL: mask(IMPORT_URL), PAGES, LANG, COUNTRY });
   const rows = await collectAndroid(APP_ID, PAGES);
   console.log('Collected', rows.length, 'android reviews');
   if (!rows.length) { console.log('Nothing to send.'); return; }
@@ -79,4 +86,3 @@ async function run(){
 }
 
 run().catch(err => { console.error(err?.response?.data || err.message || err); process.exit(1); });
-
