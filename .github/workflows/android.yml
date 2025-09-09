@@ -1,21 +1,20 @@
 name: Android Reviews Import
-
 on:
   schedule:
-    - cron: '35 * * * *'   # roda todo início de hora (UTC)
-  workflow_dispatch:       # permite rodar manualmente
-
+    - cron: '35 * * * *'
+  workflow_dispatch:
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-      - run: npm i
+          node-version: 20
+      - run: npm ci
       - run: node index.mjs
         env:
           ANDROID_APP_ID: br.com.icatuseguros.appicatu
-          WORKER_IMPORT_URL: https://reviews-bot.gabrielmtavares.workers.dev/api/import/android
+          IMPORT_URL: ${{ secrets.IMPORT_URL }}
           IMPORT_TOKEN: ${{ secrets.IMPORT_TOKEN }}
