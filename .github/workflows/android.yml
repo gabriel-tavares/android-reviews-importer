@@ -2,8 +2,8 @@ name: Android Reviews Import
 
 on:
   schedule:
-    - cron: '0 * * * *'   # todo início de hora (UTC)
-  workflow_dispatch:      # permite rodar manualmente
+    - cron: '0 * * * *'   # roda todo início de hora (UTC)
+  workflow_dispatch:       # permite rodar manualmente
 
 jobs:
   run:
