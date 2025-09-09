@@ -16,5 +16,5 @@ jobs:
       - run: node index.mjs
         env:
           ANDROID_APP_ID: br.com.icatuseguros.appicatu
-          IMPORT_URL: ${{ secrets.IMPORT_URL }}
+          WORKER_IMPORT_URL: ${{ secrets.WORKER_IMPORT_URL }}  # .../api/import/android
           IMPORT_TOKEN: ${{ secrets.IMPORT_TOKEN }}
