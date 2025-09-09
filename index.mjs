@@ -1,109 +1,79 @@
-// index.mjs
 import 'dotenv/config';
 import gplay from 'google-play-scraper';
 import axios from 'axios';
 
-const APP_ID       = process.env.ANDROID_APP_ID;
-const WORKER_URL   = process.env.WORKER_IMPORT_URL; // .../api/import/android
-const TOKEN        = process.env.IMPORT_TOKEN;
-const MAX_REVIEWS  = Number(process.env.MAX_REVIEWS || 160);
+const APP_ID  = process.env.ANDROID_APP_ID;
+const BASE    = (process.env.WORKER_URL || '').replace(/\/$/, '');
+const FULL    = (process.env.WORKER_IMPORT_URL || '').replace(/\/$/, '');
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// Se WORKER_IMPORT_URL vier completo, usa ele. Senão, monta a partir de WORKER_URL.
+const IMPORT_URL = FULL || (BASE ? (BASE + '/api/import/android') : '');
 
-async function fetchAllReviews() {
-  const out = [];
-  let next = undefined;
+const TOKEN   = process.env.IMPORT_TOKEN;
+const PAGES   = Number(process.env.ANDROID_PAGES || 2);
+const LANG    = process.env.LANG || 'pt_BR';
+const COUNTRY = (process.env.COUNTRY || 'br').toLowerCase();
 
-  while (out.length < MAX_REVIEWS) {
-    const resp = await gplay.reviews({
-      appId: APP_ID,
-      sort: gplay.sort.NEWEST,
-      num: 40,                 // por página
-      paginate: true,
-      nextPaginationToken: next,
-      throttle: 10,            // reduz paralelismo interno da lib
-      requestOptions: {        // evita estourar em 30s
-        timeout: { request: 120000 }  // 120s
-      },
-      lang: 'pt', country: 'br'
-    });
+function toIso(d){ try { return d ? new Date(d).toISOString() : null } catch { return null; } }
 
-    // a lib pode devolver array OU {data, nextPaginationToken}
-    const pageData = Array.isArray(resp) ? resp : resp.data;
-    out.push(...pageData);
-
-    next = Array.isArray(resp) ? undefined : resp.nextPaginationToken;
-    if (!next) break;
-
-    // backoff leve entre páginas
-    await sleep(1500 + Math.random() * 1500);
-  }
-
-  return out.slice(0, MAX_REVIEWS);
-}
-
-function normalize(rows) {
-  return rows
-    .map(r => ({
-      // campos com fallback para variações da lib
-      review_id: r.reviewId || r.id,
-      author: r.userName || r.author || null,
-      rating: r.score ?? r.rating ?? null,
-      title: r.title || null,
-      text: r.text || '',
-      version: r.reviewCreatedVersion || r.version || null,
-      review_date: r.date ? new Date(r.date).toISOString() : null,
-      raw: r,
-    }))
-    .filter(x => x.review_id && x.text);
-}
-
-async function postWithRetry(url, body, headers, attempts = 4) {
-  let delay = 1500;
-  for (let i = 1; i <= attempts; i++) {
-    try {
-      return await axios.post(url, body, {
-        headers,
-        timeout: 120000,                // 120s no POST
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
-        validateStatus: (s) => s >= 200 && s < 500  // deixa ver mensagens de erro
-      });
-    } catch (err) {
-      const status = err.response?.status;
-      const msg = err.response?.data || err.message;
-      console.log(`POST attempt ${i} failed${status ? ` (${status})` : ''}: ${msg}`);
-      if (i === attempts) throw err;
-      await sleep(delay + Math.random() * 500);
-      delay *= 2;
-    }
-  }
-}
-
-async function run() {
-  if (!APP_ID || !WORKER_URL || !TOKEN) {
-    console.error('Faltam variáveis ANDROID_APP_ID / WORKER_IMPORT_URL / IMPORT_TOKEN');
-    process.exit(1);
-  }
-
-  console.log('Fetching reviews from Google Play…');
-  const rows = await fetchAllReviews();
-  console.log(`Fetched ${rows.length} raw reviews`);
-
-  const payload = normalize(rows);
-  console.log(`Normalized ${payload.length} reviews`);
-
-  const res = await postWithRetry(
-    WORKER_URL,
-    payload,
-    { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
-  );
-
-  console.log(`POST ${WORKER_URL} -> ${res.status}`, res.data);
-  if (res.status >= 400) process.exit(1);
-}
-
-run().catch(err => {
-  console.error('Fatal:', err.response?.status, err.response?.data || err.message);
+if (!APP_ID || !IMPORT_URL || !TOKEN) {
+  console.error('Faltam variáveis ANDROID_APP_ID / WORKER_IMPORT_URL ou WORKER_URL / IMPORT_TOKEN');
+  console.error({ has_APP_ID: !!APP_ID, has_IMPORT_URL: !!IMPORT_URL, has_TOKEN: !!TOKEN });
   process.exit(1);
-});
+}
+
+async function collectAndroid(appId, pages=1){
+  const out = [];
+  let token = undefined;
+  for (let i=0; i<pages; i++){
+    const res = await gplay.reviews({
+      appId,
+      sort: gplay.sort.NEWEST,
+      num: 200,
+      paginate: true,
+      nextPaginationToken: token
+    });
+    token = res.nextPaginationToken;
+    for (const r of res.data){
+      out.push({
+        review_id: r.reviewId,
+        author: r.userName || null,
+        rating: r.score ?? null,
+        title: r.title ?? null,
+        text: r.text || '',
+        version: r.appVersion || null,
+        country: COUNTRY,
+        lang: LANG,
+        review_date: toIso(r.date),
+        raw: {
+          reviewId: r.reviewId,
+          userName: r.userName,
+          score: r.score,
+          text: r.text,
+          date: toIso(r.date),
+          appVersion: r.appVersion,
+          replyText: r.replyText || null,
+          replyDate: toIso(r.replyDate),
+          _dev_response_text: r.replyText || null,
+          _src: 'google-play-scraper'
+        }
+      });
+    }
+    if (!token) break;
+  }
+  return out;
+}
+
+async function run(){
+  console.log('Config:', { APP_ID, IMPORT_URL: IMPORT_URL.replace(/https?:\/\//,'https://***'), PAGES, LANG, COUNTRY });
+  const rows = await collectAndroid(APP_ID, PAGES);
+  console.log('Collected', rows.length, 'android reviews');
+  if (!rows.length) { console.log('Nothing to send.'); return; }
+
+  const resp = await axios.post(IMPORT_URL, rows, {
+    headers: { Authorization: `Bearer ${TOKEN}` }
+  });
+  console.log('Importer -> Worker response:', resp.status, resp.data);
+}
+
+run().catch(err => { console.error(err?.response?.data || err.message || err); process.exit(1); });
