@@ -3,7 +3,7 @@ name: Android Reviews Import - main
 on:
   workflow_dispatch:
   schedule:
-   - cron: '35 * * * *'
+    - cron: "0 */6 * * *"  # a cada 6h
 
 jobs:
   run:
@@ -12,11 +12,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node (no cache)
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
 
       - name: Install dependencies (lock-aware)
         run: |
@@ -26,7 +25,7 @@ jobs:
           elif [ -f yarn.lock ]; then
             corepack enable
             yarn install --frozen-lockfile
-          elif [ -f package-lock.json ]; then
+          elif [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
             npm ci
           else
             echo "No lockfile found. Running npm install..."
@@ -38,5 +37,8 @@ jobs:
           ANDROID_APP_ID: ${{ secrets.ANDROID_APP_ID }}
           WORKER_URL: ${{ secrets.WORKER_URL }}
           IMPORT_TOKEN: ${{ secrets.IMPORT_TOKEN }}
+          ANDROID_PAGES: ${{ vars.ANDROID_PAGES || 2 }}
+          LANG: ${{ vars.LANG || 'pt_BR' }}
+          COUNTRY: ${{ vars.COUNTRY || 'br' }}
         run: |
           node index.mjs
