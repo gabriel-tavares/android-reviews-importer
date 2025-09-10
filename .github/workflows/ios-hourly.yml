@@ -1,0 +1,28 @@
+name: iOS Reviews Import - hourly
+
+on:
+  schedule:
+    - cron: "5 * * * *"  # a cada 1h (5 min depois do Android)
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps
+        run: npm i
+      - name: Hourly importer (iOS)
+        env:
+          IOS_APP_ID: ${{ secrets.IOS_APP_ID }}
+          IMPORT_TOKEN:   ${{ secrets.IMPORT_TOKEN }}
+          WORKER_URL:     ${{ secrets.WORKER_URL }}
+          WORKER_IMPORT_URL: ${{ secrets.WORKER_IMPORT_URL }}
+          IOS_PAGES:  2
+          LOCALE:     br
+          LANG:       pt_BR
+          COUNTRY:    br
+        run: node ios-index.mjs
