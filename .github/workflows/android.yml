@@ -3,7 +3,7 @@ name: Android Reviews Import - main
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"  # a cada 6h
+    - cron: "10 * * * *"  # a cada 1h (10 min depois do Android)
 
 jobs:
   run:
