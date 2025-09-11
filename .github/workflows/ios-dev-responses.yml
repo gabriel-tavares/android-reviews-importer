@@ -38,7 +38,7 @@ jobs:
         env:
           IOS_APP_ID: ${{ secrets.IOS_APP_ID }}
         run: |
-          node scripts/scrape_ios_dev_responses_playwright.mjs \
+          node ./scrape_ios_dev_responses_playwright.mjs \
             --app "$IOS_APP_ID" \
             --country "${{ github.event.inputs.country || 'br' }}" \
             --limit "${{ github.event.inputs.limit || 400 }}" \
