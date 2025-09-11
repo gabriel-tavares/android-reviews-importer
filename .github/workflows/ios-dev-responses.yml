@@ -1,0 +1,61 @@
+name: iOS Dev Responses Scraper
+
+on:
+  workflow_dispatch:
+    inputs:
+      country:
+        description: 'Storefront country (default br)'
+        required: false
+        default: 'br'
+      limit:
+        description: 'Approx. number of reviews to walk'
+        required: false
+        default: '400'
+  schedule:
+    # Daily at 07:15 UTC (ajuste se quiser)
+    - cron: '15 7 * * *'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Playwright (Chromium only)
+        run: |
+          npm i -D playwright@1.47.0
+          npx playwright install --with-deps chromium
+
+      - name: Run scraper (headless)
+        env:
+          IOS_APP_ID: ${{ secrets.IOS_APP_ID }}
+        run: |
+          node scripts/scrape_ios_dev_responses_playwright.mjs \
+            --app "$IOS_APP_ID" \
+            --country "${{ github.event.inputs.country || 'br' }}" \
+            --limit "${{ github.event.inputs.limit || 400 }}" \
+            --out ios_dev_responses.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios_dev_responses
+          path: ios_dev_responses.json
+
+      - name: Merge into Worker (POST JSON)
+        env:
+          WORKER_BASE: ${{ secrets.WORKER_BASE }}
+          IMPORT_TOKEN: ${{ secrets.IMPORT_TOKEN }}
+        run: |
+          curl -sS -X POST "$WORKER_BASE/api/import/ios/dev-responses?locale=${{ github.event.inputs.country || 'br' }}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $IMPORT_TOKEN" \
+            --data-binary @ios_dev_responses.json
