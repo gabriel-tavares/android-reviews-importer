@@ -37,8 +37,10 @@ jobs:
       - name: Run scraper (headless)
         env:
           IOS_APP_ID: ${{ secrets.IOS_APP_ID }}
-        run: |
-          node ./scrape_ios_dev_responses_playwright.mjs \
+          STOREFRONT: ${{ inputs.storefront || 'br' }}
+          WALK_LIMIT: ${{ inputs.walk_limit || '400' }}
+          OUT_FILE: out/ios-dev-responses.json
+          run: node ./scrape_ios_dev_responses_playwright.mjs
             --app "$IOS_APP_ID" \
             --country "${{ github.event.inputs.country || 'br' }}" \
             --limit "${{ github.event.inputs.limit || 400 }}" \
