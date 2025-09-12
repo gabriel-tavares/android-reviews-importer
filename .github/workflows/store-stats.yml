@@ -2,8 +2,8 @@ name: Store stats (diário)
 
 on:
   schedule:
-    - cron: "5 12 * * *"   # 09:05 BRT (GitHub usa UTC)
-  workflow_dispatch:       # permite rodar manualmente
+    - cron: "5 12 * * *"      # 09:05 BRT (GitHub Actions usa UTC)
+  workflow_dispatch:
 
 jobs:
   fetch-store:
@@ -12,59 +12,72 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
 
-      - name: Instala lib Play Store
-        run: npm i google-play-scraper@12
+      # ✅ sem travar versão inexistente
+      - name: Instala dependências
+        run: |
+          npm init -y
+          npm i google-play-scraper@latest
 
       - name: Atualiza Android e iOS no Worker
         env:
           ANDROID_APP_ID: ${{ secrets.ANDROID_APP_ID }}
           IOS_APP_ID:     ${{ secrets.IOS_APP_ID }}
-          WORKER_URL:     ${{ secrets.WORKER_URL }}     # ex: https://reviews-bot.gabrielmtavares.workers.dev
-          IMPORT_TOKEN:   ${{ secrets.IMPORT_TOKEN }}   # mesmo token do Worker
+          WORKER_URL:     ${{ secrets.WORKER_URL }}
+          IMPORT_TOKEN:   ${{ secrets.IMPORT_TOKEN }}
         run: |
           node - <<'JS'
-          import gplay from 'google-play-scraper';
+          // Node 20 já tem fetch global
+          const gplay = require('google-play-scraper');
 
           const WORKER = process.env.WORKER_URL;
           const TOKEN  = process.env.IMPORT_TOKEN;
 
           async function post(payload){
-            const r = await fetch(`${WORKER}/api/store-stats`, {
-              method:'POST',
-              headers:{ 'content-type':'application/json', Authorization:`Bearer ${TOKEN}` },
+            const res = await fetch(`${WORKER}/api/store-stats`, {
+              method: 'POST',
+              headers: { 'content-type':'application/json', Authorization:`Bearer ${TOKEN}` },
               body: JSON.stringify(payload)
             });
-            console.log('POST', payload.platform, r.status);
+            console.log('POST', payload.platform, res.status);
+            if (!res.ok) {
+              const t = await res.text().catch(()=> '');
+              throw new Error(`store-stats ${payload.platform} -> ${res.status}: ${t}`);
+            }
           }
 
-          // ANDROID (usa histogram oficial)
-          try {
-            const appId = process.env.ANDROID_APP_ID;
-            const app = await gplay.app({ appId, country:'br', lang:'pt' });
-            await post({
-              platform:'android',
-              app_id: appId,
-              avg: app.score || 0,
-              ratings_total: app.ratings || 0,
-              s1: app.histogram?.['1']||0,
-              s2: app.histogram?.['2']||0,
-              s3: app.histogram?.['3']||0,
-              s4: app.histogram?.['4']||0,
-              s5: app.histogram?.['5']||0
-            });
-          } catch (e) { console.error('android fail', e); }
+          (async () => {
+            // ANDROID — com histograma oficial
+            try {
+              const appId = process.env.ANDROID_APP_ID;
+              const app = await gplay.app({ appId, country:'br', lang:'pt' });
+              await post({
+                platform:'android',
+                app_id: appId,
+                avg: app.score || 0,
+                ratings_total: app.ratings || 0,
+                s1: app.histogram?.['1']||0,
+                s2: app.histogram?.['2']||0,
+                s3: app.histogram?.['3']||0,
+                s4: app.histogram?.['4']||0,
+                s5: app.histogram?.['5']||0
+              });
+            } catch (e) {
+              console.error('android fail:', e.message || e);
+            }
 
-          // iOS (Apple não expõe histograma; só média/total)
-          try {
-            const iosId = process.env.IOS_APP_ID;
-            const res = await fetch(`https://itunes.apple.com/lookup?id=${iosId}&country=br`);
-            const j = await res.json(); const it = (j.results||[])[0] || {};
-            await post({
-              platform:'ios',
-              app_id: iosId,
-              avg: it.averageUserRating ?? it.averageUserRatingForCurrentVersion ?? 0,
-              ratings_total: it.userRatingCount ?? it.userRatingCountForCurrentVersion ?? 0,
-              s1:0,s2:0,s3:0,s4:0,s5:0
-            });
-          } catch (e) { console.error('ios fail', e); }
-          JS
+            // iOS — Apple não expõe histograma; média/total via Lookup API
+            try {
+              const iosId = process.env.IOS_APP_ID;
+              const r = await fetch(`https://itunes.apple.com/lookup?id=${iosId}&country=br`);
+              const j = await r.json();
+              const it = (j.results||[])[0] || {};
+              await post({
+                platform:'ios',
+                app_id: iosId,
+                avg: it.averageUserRating ?? it.averageUserRatingForCurrentVersion ?? 0,
+                ratings_total: it.userRatingCount ?? it.userRatingCountForCurrentVersion ?? 0,
+                s1:0, s2:0, s3:0, s4:0, s5:0
+              });
+            } catch (e) {
+              console.error('ios fail:', e.message || e);
+            }
