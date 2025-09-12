@@ -13,7 +13,7 @@ on:
         default: '400'
   schedule:
     # Daily at 07:15 UTC (ajuste se quiser)
-    - cron: '15 7 * * *'
+    - cron: '15 */4 * * *'   # use 0 */4 * * * se preferir cravar no minuto 0
 
 jobs:
   scrape:
