@@ -2,7 +2,7 @@ name: Store stats (diário)
 
 on:
   schedule:
-    - cron: "5 12 * * *"      # 09:05 BRT (GitHub Actions usa UTC)
+    - cron: "5 12 * * *"      # 09:05 BRT (GitHub usa UTC)
   workflow_dispatch:
 
 jobs:
@@ -12,30 +12,29 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
 
-      # ✅ sem travar versão inexistente
       - name: Instala dependências
         run: |
           npm init -y
           npm i google-play-scraper@latest
 
-      - name: Atualiza Android e iOS no Worker
+      - name: Cria script e executa
         env:
           ANDROID_APP_ID: ${{ secrets.ANDROID_APP_ID }}
           IOS_APP_ID:     ${{ secrets.IOS_APP_ID }}
           WORKER_URL:     ${{ secrets.WORKER_URL }}
           IMPORT_TOKEN:   ${{ secrets.IMPORT_TOKEN }}
         run: |
-          node - <<'JS'
-          // Node 20 já tem fetch global
+          cat > fetch-store.cjs <<'JS'
           const gplay = require('google-play-scraper');
-
-          const WORKER = process.env.WORKER_URL;
-          const TOKEN  = process.env.IMPORT_TOKEN;
+          const { ANDROID_APP_ID, IOS_APP_ID, WORKER_URL, IMPORT_TOKEN } = process.env;
 
           async function post(payload){
-            const res = await fetch(`${WORKER}/api/store-stats`, {
+            const res = await fetch(`${WORKER_URL}/api/store-stats`, {
               method: 'POST',
-              headers: { 'content-type':'application/json', Authorization:`Bearer ${TOKEN}` },
+              headers: {
+                'content-type':'application/json',
+                Authorization: `Bearer ${IMPORT_TOKEN}`
+              },
               body: JSON.stringify(payload)
             });
             console.log('POST', payload.platform, res.status);
@@ -48,11 +47,10 @@ jobs:
           (async () => {
             // ANDROID — com histograma oficial
             try {
-              const appId = process.env.ANDROID_APP_ID;
-              const app = await gplay.app({ appId, country:'br', lang:'pt' });
+              const app = await gplay.app({ appId: ANDROID_APP_ID, country:'br', lang:'pt' });
               await post({
                 platform:'android',
-                app_id: appId,
+                app_id: ANDROID_APP_ID,
                 avg: app.score || 0,
                 ratings_total: app.ratings || 0,
                 s1: app.histogram?.['1']||0,
@@ -65,15 +63,13 @@ jobs:
               console.error('android fail:', e.message || e);
             }
 
-            // iOS — Apple não expõe histograma; média/total via Lookup API
+            // iOS — Apple não expõe histograma (só média/total)
             try {
-              const iosId = process.env.IOS_APP_ID;
-              const r = await fetch(`https://itunes.apple.com/lookup?id=${iosId}&country=br`);
-              const j = await r.json();
-              const it = (j.results||[])[0] || {};
+              const r = await fetch(`https://itunes.apple.com/lookup?id=${IOS_APP_ID}&country=br`);
+              const j = await r.json(); const it = (j.results||[])[0] || {};
               await post({
                 platform:'ios',
-                app_id: iosId,
+                app_id: IOS_APP_ID,
                 avg: it.averageUserRating ?? it.averageUserRatingForCurrentVersion ?? 0,
                 ratings_total: it.userRatingCount ?? it.userRatingCountForCurrentVersion ?? 0,
                 s1:0, s2:0, s3:0, s4:0, s5:0
@@ -81,3 +77,7 @@ jobs:
             } catch (e) {
               console.error('ios fail:', e.message || e);
             }
+          })().catch(err => { console.error(err); process.exitCode = 1; });
+          JS
+
+          node fetch-store.cjs
