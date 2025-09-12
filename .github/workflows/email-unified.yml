@@ -1,0 +1,21 @@
+name: Reviews Email (Unified)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # roda a cada 4h no minuto 20 (5/10/15 já rodaram)
+    - cron: '20 */4 * * *'
+
+jobs:
+  unified-email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Worker aggregate endpoint
+        env:
+          WORKER_BASE: ${{ secrets.WORKER_BASE }}   # ex: https://reviews-bot.seuworker.workers.dev
+          IMPORT_TOKEN: ${{ secrets.IMPORT_TOKEN }} # mesmo token usado nos outros imports
+        run: |
+          set -e
+          curl -sS -X POST \
+            -H "Authorization: Bearer $IMPORT_TOKEN" \
+            "$WORKER_BASE/api/notify/aggregate?window=${WINDOW:-40}"
