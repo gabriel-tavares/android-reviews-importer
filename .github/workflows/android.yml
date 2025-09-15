@@ -1,44 +1,43 @@
-name: Android Reviews Import - main
+name: Android Reviews Import - hourly
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '5 */4 * * *'   # use 0 */4 * * * se preferir cravar no minuto 0
+    - cron: '20 */4 * * *'   # a cada 4h no minuto 20 (UTC)
+  workflow_dispatch:
+
+concurrency:
+  group: reviews-android
+  cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node (no cache)
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
 
-      - name: Install dependencies (lock-aware)
-        run: |
-          if [ -f pnpm-lock.yaml ]; then
-            corepack enable
-            pnpm install --frozen-lockfile=false
-          elif [ -f yarn.lock ]; then
-            corepack enable
-            yarn install --frozen-lockfile
-          elif [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
-            npm ci
-          else
-            echo "No lockfile found. Running npm install..."
-            npm install
-          fi
+      - name: Install deps
+        run: npm ci
 
-      - name: Run importer
+      - name: Import Android reviews
         env:
-          ANDROID_APP_ID: ${{ secrets.ANDROID_APP_ID }}
+          ANDROID_APP_ID:      ${{ secrets.ANDROID_APP_ID }}
+          IMPORT_TOKEN:        ${{ secrets.IMPORT_TOKEN }}
+          WORKER_URL:          ${{ secrets.WORKER_URL }}
+          WORKER_IMPORT_URL:   ${{ secrets.WORKER_IMPORT_URL }}  # ex.: https://reviews-bot.../api/import/android
+          LANG:       pt_BR
+          COUNTRY:    br
+        run: node android-index.mjs
+
+      - name: Generate AI suggestions (Android)
+        env:
+          TOKEN:      ${{ secrets.IMPORT_TOKEN }}
           WORKER_URL: ${{ secrets.WORKER_URL }}
-          IMPORT_TOKEN: ${{ secrets.IMPORT_TOKEN }}
-          ANDROID_PAGES: ${{ vars.ANDROID_PAGES || 2 }}
-          LANG: ${{ vars.LANG || 'pt_BR' }}
-          COUNTRY: ${{ vars.COUNTRY || 'br' }}
         run: |
-          node index.mjs
+          set -euo pipefail
+          curl -fS -X POST "$WORKER_URL/api/ai/suggest-batch?platform=android&limit=40" \
+               -H "Authorization: Bearer $TOKEN" \
+               -H "Content-Type: application/json"
