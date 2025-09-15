@@ -26,13 +26,13 @@ jobs:
           else
             npm i
           fi
-          
+
       - name: Import iOS reviews
         env:
-          IOS_APP_ID:          ${{ secrets.IOS_APP_ID }}
-          IMPORT_TOKEN:        ${{ secrets.IMPORT_TOKEN }}
-          WORKER_URL:          ${{ secrets.WORKER_URL }}         # ex.: https://reviews-bot...workers.dev
-          WORKER_IMPORT_URL:   ${{ secrets.WORKER_IMPORT_URL }}  # ex.: https://reviews-bot.../api/import/ios
+          IOS_APP_ID:        ${{ secrets.IOS_APP_ID }}
+          IMPORT_TOKEN:      ${{ secrets.IMPORT_TOKEN }}
+          WORKER_URL:        ${{ secrets.WORKER_URL }}         # ex.: https://reviews-bot...workers.dev
+          WORKER_IMPORT_URL: ${{ secrets.WORKER_IMPORT_URL }}  # se usar endpoint dedicado
           IOS_PAGES:  2
           LOCALE:     br
           COUNTRY:    br
@@ -43,8 +43,8 @@ jobs:
         env:
           TOKEN:      ${{ secrets.IMPORT_TOKEN }}
           WORKER_URL: ${{ secrets.WORKER_URL }}
-          run: |
-            set -euo pipefail
-            curl --fail-with-body -sS -X POST "$WORKER_URL/api/ai/suggest-batch?platform=ios&limit=40" \
-                 -H "Authorization: Bearer $TOKEN" \
-                 -H "Content-Type: application/json"
+        run: |
+          set -euo pipefail
+          curl --fail-with-body -sS -X POST "$WORKER_URL/api/ai/suggest-batch?platform=ios&limit=40" \
+               -H "Authorization: Bearer $TOKEN" \
+               -H "Content-Type: application/json"
