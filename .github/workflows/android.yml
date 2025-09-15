@@ -41,8 +41,8 @@ jobs:
         env:
           TOKEN:      ${{ secrets.IMPORT_TOKEN }}
           WORKER_URL: ${{ secrets.WORKER_URL }}
-        run: |
-          set -euo pipefail
-          curl -fS -X POST "$WORKER_URL/api/ai/suggest-batch?platform=android&limit=40" \
-               -H "Authorization: Bearer $TOKEN" \
-               -H "Content-Type: application/json"
+          run: |
+            set -euo pipefail
+            curl --fail-with-body -sS -X POST "$WORKER_URL/api/ai/suggest-batch?platform=ios&limit=40" \
+                 -H "Authorization: Bearer $TOKEN" \
+                 -H "Content-Type: application/json"
