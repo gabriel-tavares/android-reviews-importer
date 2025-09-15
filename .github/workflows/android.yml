@@ -30,7 +30,7 @@ jobs:
           WORKER_IMPORT_URL:   ${{ secrets.WORKER_IMPORT_URL }}  # ex.: https://reviews-bot.../api/import/android
           LANG:       pt_BR
           COUNTRY:    br
-        run: node android-index.mjs
+        run: node index.mjs
 
       - name: Generate AI suggestions (Android)
         env:
