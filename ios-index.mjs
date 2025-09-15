@@ -111,10 +111,49 @@ async function fetchRssRecent(appId, page=1, country='br') {
   return rows;
 }
 
+// === AMP JSON API (oficial do site) — pega os mais recentes ===
+// Tenta sem autenticação. A Apple costuma aceitar com esses headers.
+async function fetchAmpReviews(appId, country = 'br', lang = 'pt-BR', limit = 50, offset = 0) {
+  const url = `https://amp-api.apps.apple.com/v1/catalog/${country}/apps/${appId}/reviews?l=${encodeURIComponent(lang)}&platform=web&offset=${offset}&limit=${limit}&sort=mostRecent`;
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0',
+      'Origin': 'https://apps.apple.com',
+      'Referer': `https://apps.apple.com/${country}/app/id${appId}`,
+      'Accept': 'application/json'
+    }
+  });
+  if (!res.ok) throw new Error(`AMP ${res.status}`);
+  const data = await res.json();
+  const arr = Array.isArray(data?.data) ? data.data : [];
+  const out = [];
+  for (const x of arr) {
+    const a = x?.attributes || {};
+    out.push({
+      platform: 'ios',
+      review_id: x?.id || null,                // ótimo para dedupe
+      author: a.userName || a.user || null,
+      rating: a.rating != null ? Number(a.rating) : null,
+      title: a.title || null,
+      text: a.review || a.body || '',
+      review_date: a.date ? new Date(a.date).toISOString() : (a.createdDate ? new Date(a.createdDate).toISOString() : null),
+      country, lang
+    });
+  }
+  return out;
+}
+
+
 /* ---------------- Coletor principal: RSS + HTML (union + dedupe) --------------------------- */
-async function collectIOS(appId, pages=3, country='br') {
+async function collectIOS(appId, pages = 3, country = 'br') {
+  // 1) AMP (mais recentes)
+  let amp = [];
+  try { amp = await fetchAmpReviews(appId, country, 'pt-BR', 50, 0); }
+  catch (e) { console.log('AMP fail:', e?.message || e); }
+
+  // 2) RSS (mais recentes)
   const rss = [];
-  for (let p=1; p<=pages; p++) {
+  for (let p = 1; p <= pages; p++) {
     try {
       const pageRows = await fetchRssRecent(appId, p, country);
       if (!pageRows.length) break;
@@ -125,36 +164,33 @@ async function collectIOS(appId, pages=3, country='br') {
     }
   }
 
+  // 3) HTML “see-all” (pega resp. do dev e alguns cards)
   let html = [];
   try { html = await fetchHtmlSeeAllFull(appId, country); } catch {}
 
-  const sig = (r) => `${lown(r.author)}|${lown(r.text || r.title).slice(0,120)}|${(r.review_date||'').slice(0,10)}`;
+  // 4) UNION + DEDUPE por assinatura (autor + prefixo texto + dia)
+  const norm = s => (s || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
+  const sig  = r => `${norm(r.author)}|${norm(r.text || r.title).slice(0,120)}|${(r.review_date||'').slice(0,10)}`;
   const bySig = new Map();
 
-  // preferir RSS (tem review_id); injeta dev_response do HTML
-  for (const r of [...rss, ...html]) {
+  // Ordem importa: preferimos quem tem review_id (AMP/RSS), e injetamos dev_response do HTML
+  for (const r of [...amp, ...rss, ...html]) {
     const k = sig(r);
     if (!bySig.has(k)) { bySig.set(k, r); continue; }
     const prev = bySig.get(k);
     if (r.review_id && !prev.review_id) {
-      const merged = { ...r, raw: { ...(r.raw||{}) } };
-      if (prev.raw?._dev_response_text && !merged.raw?._dev_response_text) {
-        merged.raw._dev_response_text = prev.raw._dev_response_text;
-      }
-      bySig.set(k, merged);
-    } else {
-      const dev = r.raw?._dev_response_text;
-      if (dev && !(prev.raw||{})._dev_response_text) {
-        prev.raw = prev.raw || {};
-        prev.raw._dev_response_text = dev;
-      }
+      bySig.set(k, { ...r, raw: { ...(r.raw||{}), ...(prev.raw||{}) } });
+    } else if ((r.raw||{})._dev_response_text && !(prev.raw||{})._dev_response_text) {
+      prev.raw = prev.raw || {};
+      prev.raw._dev_response_text = r.raw._dev_response_text;
     }
   }
 
   const merged = [...bySig.values()];
-  console.log(`iOS collected: rss=${rss.length} html=${html.length} merged=${merged.length} country=${country}`);
+  console.log(`iOS collected: amp=${amp.length} rss=${rss.length} html=${html.length} merged=${merged.length}`);
   return merged;
 }
+
 
 /* ---------------- Execução ----------------------------------------------------------------- */
 async function run() {
