@@ -30,23 +30,31 @@ function norm(s){ return (s || '').toString().replace(/\s+/g,' ').trim(); }
 function stripTags(t){ return t ? t.replace(/<[^>]+>/g, '') : ''; }
 function startsWithLoose(a,b){ a=norm(a).toLowerCase(); b=norm(b).toLowerCase(); if(!a||!b) return false; return a.startsWith(b) || b.startsWith(a) || a.includes(b.slice(0,30)) || b.includes(a.slice(0,30)); }
 
-async function fetchRssPage(appId, page=1, locale='br'){
-  const url = `https://itunes.apple.com/rss/customerreviews/page=${page}/id=${appId}/sortby=mostrecent/json?l=pt&cc=${locale}`;
-  const res = await fetch(url);
+// === REPLACE: pega os "mais recentes" da loja correta (com país no PATH) ===
+async function fetchRssPage(appId, page = 1, country = 'br', lang = 'pt') {
+  const url = `https://itunes.apple.com/${country}/rss/customerreviews/page=${page}/id=${appId}/sortby=mostrecent/json`;
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
   if (!res.ok) throw new Error(`RSS ${page} ${res.status}`);
   const data = await res.json();
+
   const entries = Array.isArray(data?.feed?.entry) ? data.feed.entry : [];
   const out = [];
-  // first entry can be app metadata; skip if doesn't have review fields
-  for (const e of entries){
-    const hasReview = e?.content?.label || e?.title?.label;
-    if (!hasReview) continue;
-    const rid = e?.id?.label || e?.id?.attributes?.['im:id'] || null;
+
+  for (const e of entries) {
+    // A 1ª entry costuma ser METADADO do app (tem im:name). Pule.
+    if (e?.['im:name']) continue;
+
+    const rid    = e?.id?.label || e?.id?.attributes?.['im:id'] || null;
     const author = e?.author?.name?.label || null;
     const rating = e?.['im:rating']?.label ? Number(e['im:rating'].label) : null;
-    const title = e?.title?.label || null;
-    const text = e?.content?.label || null;
-    const date = e?.updated?.label || e?.['im:voteSum']?.label || null;
+    const title  = e?.title?.label || null;
+    const text   = e?.content?.label || null;
+
+    // data correta: updated OU releaseDate (nunca voteSum)
+    const date   = e?.updated?.label || e?.['im:releaseDate']?.label || null;
+
+    // só empurre se for um review mesmo
+    if (!author && !text && !title) continue;
 
     out.push({
       review_id: rid,
@@ -55,7 +63,7 @@ async function fetchRssPage(appId, page=1, locale='br'){
       title,
       text,
       review_date: toIso(date),
-      country: locale,
+      country,
       lang: LANG,
       raw: { rss: e }
     });
@@ -106,21 +114,28 @@ function mergeDevReplies(rssRows, htmlEntries){
   return out;
 }
 
-async function collectIOS(appId, pages=3, locale='br'){
+async function collectIOS(appId, pages = 3, country = 'br') {
   const rssRows = [];
-  for (let p=1; p<=pages; p++) {
+  for (let p = 1; p <= pages; p++) {
     try {
-      const rows = await fetchRssPage(appId, p, locale);
+      const rows = await fetchRssPage(appId, p, country, 'pt');
       if (!rows.length) break;
       rssRows.push(...rows);
     } catch (e) {
-      if (p===1) console.error('RSS error page 1:', e?.message || e);
+      if (p === 1) console.error('RSS error page 1:', e?.message || e);
       break;
     }
   }
+
+  // HTML "see-all" apenas para tentar capturar resposta do dev
   let htmlEntries = [];
-  try { htmlEntries = await fetchHtmlSeeAll(appId, locale); } catch {}
+  try { htmlEntries = await fetchHtmlSeeAll(appId, country); } catch {}
+
   const merged = mergeDevReplies(rssRows, htmlEntries);
+
+  // (opcional) log rápido pra depurar
+  console.log(`iOS RSS collected=${rssRows.length} merged=${merged.length} country=${country}`);
+
   return merged;
 }
 
