@@ -29,39 +29,39 @@ const norm  = (s) => (s || '').toString().replace(/\s+/g,' ').trim();
 const lown  = (s) => norm(s).toLowerCase();
 
 /* ---------------- HTML “ver todas” – pega autor, texto, rating, data e resp. do dev -------- */
-async function fetchHtmlSeeAllFull(appId, country='br') {
+// === cole no ios-index.mjs no lugar da sua fetchHtmlSeeAllFull ===
+async function fetchHtmlSeeAllFull(appId, country = 'br') {
   const url = `https://apps.apple.com/${country}/app/id${appId}?see-all=reviews`;
   const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
   const html = await res.text();
 
-  const blocks = html.split(/we-customer-review(?:__|-)body/gi);
-  const clean = (s) => (s || '').replace(/<[^>]+>/g, '').replace(/\s+/g,' ').trim();
-  const get = (re, s) => { const m = re.exec(s); return m ? m[1] : null; };
-
+  // pega cada card completo
+  const cards = html.match(/<we-customer-review[\s\S]*?<\/we-customer-review>/gi) || [];
+  const clean = (s) => (s || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
   const out = [];
-  for (const chunk of blocks) {
-    const author = clean(get(/we-customer-review__user[^>]*>([^<]+)/i, chunk) || '');
-    const title  = clean(get(/we-customer-review__title[^>]*>([\s\S]*?)<\/h3>/i, chunk) || '');
+
+  for (const card of cards) {
+    const author = clean((/we-customer-review__user[^>]*>([^<]+)/i.exec(card) || [])[1]);
+    const title  = clean((/we-customer-review__title[^>]*>([\s\S]*?)<\/h3>/i.exec(card) || [])[1]);
     const text   = clean(
-      get(/<span[^>]*class="[^"]*we-clamp[^"]*"[^>]*>([\s\S]*?)<\/span>/i, chunk) ||
-      get(/<p[^>]*>([\s\S]*?)<\/p>/i, chunk) || ''
+      (/we-customer-review__body[^>]*>([\s\S]*?)<\/p>/i.exec(card) || [])[1] ||
+      (/<span[^>]*class="[^"]*we-clamp[^"]*"[^>]*>([\s\S]*?)<\/span>/i.exec(card) || [])[1] ||
+      ''
     );
+    const rMatch = /aria-label="(\d+)(?:[.,]\d+)?\s*(?:de|out of)\s*5"/i.exec(card);
+    const rating = rMatch ? parseInt(rMatch[1], 10) : null;
 
-    let rating = null;
-    const mR = /aria-label="(\d+)(?:[.,]\d+)?\s*de\s*5"/i.exec(chunk);
-    if (mR) rating = parseInt(mR[1], 10);
-
+    // data dd/mm/aaaa (BR) ou yyyy-mm-dd
     let review_date = null;
-    const mD = /(\d{2})\/(\d{2})\/(\d{4})/.exec(chunk);
-    if (mD) review_date = toIso(`${mD[2]}/${mD[1]}/${mD[3]}`); // mm/dd/yyyy → ISO
-
-    let dev = null;
-    const devBlock = /(Resposta do desenvolvedor|Developer Response)[\s\S]*?(<span[^>]*class="[^"]*we-clamp[^"]*"[^>]*>([\s\S]*?)<\/span>|<p[^>]*>([\s\S]*?)<\/p>)/i.exec(chunk);
-    if (devBlock) {
-      const g = /<span[^>]*class="[^"]*we-clamp[^"]*"[^>]*>([\s\S]*?)<\/span>/i.exec(devBlock[0]) ||
-                /<p[^>]*>([\s\S]*?)<\/p>/i.exec(devBlock[0]);
-      if (g) dev = clean(g[1]);
+    const dm = /(\d{2})\/(\d{2})\/(\d{4})/.exec(card) || /(\d{4})-(\d{2})-(\d{2})/.exec(card);
+    if (dm) {
+      if (dm[1].length === 4) review_date = new Date(`${dm[1]}-${dm[2]}-${dm[3]}T00:00:00Z`).toISOString();
+      else review_date = new Date(`${dm[3]}-${dm[2]}-${dm[1]}T00:00:00Z`).toISOString();
     }
+
+    // resposta do dev
+    const devM = /(Resposta do desenvolvedor|Developer Response)[\s\S]*?(?:<p[^>]*>|<span[^>]*class="[^"]*we-clamp[^"]*"[^>]*>)([\s\S]*?)(?:<\/span>|<\/p>)/i.exec(card);
+    const dev = clean(devM ? devM[2] : '');
 
     if (author && (text || title)) {
       out.push({
@@ -73,11 +73,16 @@ async function fetchHtmlSeeAllFull(appId, country='br') {
   }
 
   // dedupe interno do HTML
+  const norm = (s) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
   const map = new Map();
   for (const it of out) {
-    const key = `${lown(it.author)}|${lown(it.text).slice(0,120)}|${(it.review_date||'').slice(0,10)}`;
+    const key = `${norm(it.author)}|${norm(it.text || it.title).slice(0,120)}|${(it.review_date||'').slice(0,10)}`;
     if (!map.has(key)) map.set(key, it);
   }
+
+  // debug: imprime os primeiros autores pra conferir que o Vagner veio
+  console.log('HTML authors sample:', [...map.values()].slice(0,6).map(x => x.author));
+
   return [...map.values()];
 }
 
