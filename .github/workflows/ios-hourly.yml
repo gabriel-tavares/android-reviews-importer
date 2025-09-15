@@ -20,8 +20,13 @@ jobs:
           node-version: '20'
 
       - name: Install deps
-        run: npm ci
-
+        run: |
+          if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci
+          else
+            npm i
+          fi
+          
       - name: Import iOS reviews
         env:
           IOS_APP_ID:          ${{ secrets.IOS_APP_ID }}
