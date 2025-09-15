@@ -2,27 +2,44 @@ name: iOS Reviews Import - hourly
 
 on:
   schedule:
-    - cron: '10 */4 * * *'   # use 0 */4 * * * se preferir cravar no minuto 0
+    - cron: '10 */4 * * *'   # a cada 4h no minuto 10 (UTC)
   workflow_dispatch:
+
+concurrency:
+  group: reviews-ios
+  cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
+
       - name: Install deps
-        run: npm i
-      - name: Hourly importer (iOS)
+        run: npm ci
+
+      - name: Import iOS reviews
         env:
-          IOS_APP_ID: ${{ secrets.IOS_APP_ID }}
-          IMPORT_TOKEN:   ${{ secrets.IMPORT_TOKEN }}
-          WORKER_URL:     ${{ secrets.WORKER_URL }}
-          WORKER_IMPORT_URL: ${{ secrets.WORKER_IMPORT_URL }}
+          IOS_APP_ID:          ${{ secrets.IOS_APP_ID }}
+          IMPORT_TOKEN:        ${{ secrets.IMPORT_TOKEN }}
+          WORKER_URL:          ${{ secrets.WORKER_URL }}         # ex.: https://reviews-bot...workers.dev
+          WORKER_IMPORT_URL:   ${{ secrets.WORKER_IMPORT_URL }}  # ex.: https://reviews-bot.../api/import/ios
           IOS_PAGES:  2
           LOCALE:     br
-          LANG:       pt_BR
           COUNTRY:    br
+          LANG:       pt_BR
         run: node ios-index.mjs
+
+      - name: Generate AI suggestions (iOS)
+        env:
+          TOKEN:      ${{ secrets.IMPORT_TOKEN }}
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+        run: |
+          set -euo pipefail
+          curl -fS -X POST "$WORKER_URL/api/ai/suggest-batch?platform=ios&limit=40" \
+               -H "Authorization: Bearer $TOKEN" \
+               -H "Content-Type: application/json"
