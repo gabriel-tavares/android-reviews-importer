@@ -1,0 +1,26 @@
+name: Reviews Import (hourly)
+on:
+  schedule:
+    - cron: '0 * * * *'  # hourly
+  workflow_dispatch: {}
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm i
+      - name: Import iOS
+        env:
+          IMPORT_TOKEN: ${{ secrets.IMPORT_TOKEN }}
+          WORKER_IMPORT_URL_IOS: ${{ secrets.WORKER_IMPORT_URL_IOS }}
+          IOS_APP_ID: ${{ secrets.IOS_APP_ID }}
+        run: node import-ios.mjs
+      - name: Import Android
+        env:
+          IMPORT_TOKEN: ${{ secrets.IMPORT_TOKEN }}
+          WORKER_IMPORT_URL_ANDROID: ${{ secrets.WORKER_IMPORT_URL_ANDROID }}
+          ANDROID_APP_ID: ${{ secrets.ANDROID_APP_ID }}
+        run: node import-android.mjs
