@@ -196,7 +196,7 @@ async function fetchHtmlSeeAllFull(appId, country='br') {
 // ------------------- Coleta + merge/dedupe -------------------
 async function collectIOS(appId, pages=5, country='br') {
   let amp = [];
-  try { amp = await fetchAmpReviews(appId, country, LANG, 50, 0); }
+  try { amp = await fetchAmpReviews(APP_ID, COUNTRY, LANG, 50, 0); }
   catch (e) { console.log('AMP fail:', e?.message || e); }
 
   const rss = [];
