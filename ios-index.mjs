@@ -1,4 +1,4 @@
-// ios-index.mjs — coletor iOS com AMP JSON + RSS + HTML (merge/dedupe)
+// ios-index.mjs — iOS collector (AMP + RSS + HTML)
 import 'dotenv/config';
 
 // ------------------- Config -------------------
@@ -34,7 +34,7 @@ const norm  = (s) => (s || '').toString().replace(/\s+/g,' ').trim();
 const lown  = (s) => norm(s).toLowerCase();
 
 // ------------------- AMP support -------------------
-// 1) Lê widgetKey + storefrontId do HTML (aceita JSON com entidades e/ou %encoding)
+// Lê widgetKey + storefrontId do HTML (content pode vir com entidades e/ou %encoding)
 async function getAppleWebConfig(appId, country = 'br', lang = 'pt-BR') {
   const url = `https://apps.apple.com/${country}/app/id${appId}`;
   const res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': lang } });
@@ -43,78 +43,63 @@ async function getAppleWebConfig(appId, country = 'br', lang = 'pt-BR') {
   const m = html.match(/<meta[^>]+name="web-experience-app\/config\/environment"[^>]+content="([^"]+)"/i);
   if (!m) throw new Error('config meta not found');
 
-  let raw = m[1];
-  // desserializa entidades HTML
-  raw = raw
+  let raw = m[1]
     .replace(/&quot;/g, '"')
     .replace(/&#x27;/g, "'")
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>');
-  // se vier URL-encoded (%7B%22...%7D), decodifica
   if (/^%7B/i.test(raw) || /%22|%7D|%7B/i.test(raw)) {
-    try { raw = decodeURIComponent(raw); } catch { /* ignore */ }
+    try { raw = decodeURIComponent(raw); } catch {}
   }
-  // às vezes vem uma string JSON embrulhada em aspas
   if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
     raw = raw.slice(1, -1);
   }
 
   let cfg;
-  try {
-    cfg = JSON.parse(raw);
-  } catch {
-    // último recurso: pode ser JSON string dentro de JSON string
-    cfg = JSON.parse(JSON.parse(raw));
-  }
+  try { cfg = JSON.parse(raw); }
+  catch { cfg = JSON.parse(JSON.parse(raw)); }
 
   const widgetKey    = cfg?.APP_STORE_DEFAULTS?.widgetKey ?? cfg?.widgetKey;
-  const storefrontId = cfg?.STORE_FRONT?.storefront   ?? cfg?.storefrontId ?? cfg?.storefront;
+  const storefrontId = cfg?.STORE_FRONT?.storefront       ?? cfg?.storefrontId ?? cfg?.storefront;
   if (!widgetKey || !storefrontId) throw new Error('widgetKey/storefrontId not found');
   return { widgetKey, storefrontId };
 }
 
-// 2) HTML "see-all" (força idioma e melhora cobertura)
-async function fetchHtmlSeeAllFull(appId, country = 'br') {
-  const url = `https://apps.apple.com/${country}/app/id${appId}?see-all=reviews&l=${encodeURIComponent(LANG)}`;
-  const res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': LANG } });
-  const html = await res.text();
-
-  const cards = html.match(/<we-customer-review[\s\S]*?<\/we-customer-review>/gi) || [];
-  const clean = (s) => (s || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-  const out = [];
-
-  for (const card of cards) {
-    const author = clean((/we-customer-review__user[^>]*>([^<]+)/i.exec(card) || [])[1]);
-    const title  = clean((/we-customer-review__title[^>]*>([\s\S]*?)<\/h3>/i.exec(card) || [])[1]);
-    const text   = clean(
-      (/we-customer-review__body[^>]*>([\s\S]*?)<\/p>/i.exec(card) || [])[1] ||
-      (/<span[^>]*class="[^"]*we-clamp[^"]*"[^>]*>([\s\S]*?)<\/span>/i.exec(card) || [])[1] || ''
-    );
-    const rMatch = /aria-label="(\d+)(?:[.,]\d+)?\s*(?:de|out of)\s*5"/i.exec(card);
-    const rating = rMatch ? parseInt(rMatch[1], 10) : null;
-
-    let review_date = null;
-    const dm = /(\d{2})\/(\d{2})\/(\d{4})/.exec(card) || /(\d{4})-(\d{2})-(\d{2})/.exec(card);
-    if (dm) {
-      if (dm[1].length === 4) review_date = new Date(`${dm[1]}-${dm[2]}-${dm[3]}T00:00:00Z`).toISOString();
-      else review_date = new Date(`${dm[3]}-${dm[2]}-${dm[1]}T00:00:00Z`).toISOString();
+// AMP JSON (mais recentes)
+async function fetchAmpReviews(appId, country='br', lang='pt-BR', limit=50, offset=0) {
+  const { widgetKey, storefrontId } = await getAppleWebConfig(appId, country, lang);
+  const url = `https://amp-api.apps.apple.com/v1/catalog/${country}/apps/${appId}/reviews?l=${encodeURIComponent(lang)}&platform=web&offset=${offset}&limit=${limit}&sort=mostRecent`;
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': UA,
+      'Accept': 'application/json',
+      'Origin': 'https://apps.apple.com',
+      'Referer': `https://apps.apple.com/${country}/app/id${appId}`,
+      'X-Apple-Widget-Key': widgetKey,
+      'X-Apple-Store-Front': storefrontId,
+      'Accept-Language': lang
     }
-
-    const devM = /(Resposta do desenvolvedor|Developer Response)[\s\S]*?(?:<p[^>]*>|<span[^>]*class="[^"]*we-clamp[^"]*"[^>]*>)([\s\S]*?)(?:<\/span>|<\/p>)/i.exec(card);
-    const dev  = clean(devM ? devM[2] : '');
-
-    if (author && (text || title)) {
-      out.push({ platform: 'ios', author, title, text, rating, review_date, raw: { html: true, _dev_response_text: dev } });
-    }
-  }
-
-  const key = (r) => `${(r.author||'').toLowerCase()}|${(r.text||r.title||'').toLowerCase().slice(0,120)}|${(r.review_date||'').slice(0,10)}`;
-  const map = new Map();
-  for (const it of out) { const k = key(it); if (!map.has(k)) map.set(k, it); }
-  return [...map.values()];
+  });
+  if (!res.ok) throw new Error(`AMP ${res.status}`);
+  const data = await res.json();
+  const arr = Array.isArray(data?.data) ? data.data : [];
+  return arr.map(x => {
+    const a = x?.attributes || {};
+    return {
+      platform: 'ios',
+      review_id: x?.id || null,
+      author: a.userName || a.user || null,
+      rating: a.rating != null ? Number(a.rating) : null,
+      title: a.title || null,
+      text: a.review || a.body || '',
+      review_date: a.date ? new Date(a.date).toISOString()
+               : (a.createdDate ? new Date(a.createdDate).toISOString() : null),
+      country, lang,
+      raw: { amp: true }
+    };
+  });
 }
-
 
 // ------------------- RSS (fallback) -------------------
 async function fetchRssRecent(appId, page=1, country='br') {
@@ -147,8 +132,8 @@ async function fetchRssRecent(appId, page=1, country='br') {
 
 // ------------------- HTML (resposta do dev + cards renderizados) -------------------
 async function fetchHtmlSeeAllFull(appId, country='br') {
-  const url = `https://apps.apple.com/${country}/app/id${appId}?see-all=reviews`;
-  const res = await fetch(url, { headers: { 'User-Agent': UA }});
+  const url = `https://apps.apple.com/${country}/app/id${appId}?see-all=reviews&l=${encodeURIComponent(LANG)}`;
+  const res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': LANG }});
   const html = await res.text();
 
   const cards = html.match(/<we-customer-review[\s\S]*?<\/we-customer-review>/gi) || [];
@@ -184,19 +169,16 @@ async function fetchHtmlSeeAllFull(appId, country='br') {
     }
   }
 
-  // dedupe interno do HTML
+  const key = (r) => `${(r.author||'').toLowerCase()}|${(r.text||r.title||'').toLowerCase().slice(0,120)}|${(r.review_date||'').slice(0,10)}`;
   const map = new Map();
-  for (const it of out) {
-    const key = `${lown(it.author)}|${lown(it.text || it.title).slice(0,120)}|${(it.review_date||'').slice(0,10)}`;
-    if (!map.has(key)) map.set(key, it);
-  }
+  for (const it of out) { const k = key(it); if (!map.has(k)) map.set(k, it); }
   return [...map.values()];
 }
 
 // ------------------- Coleta + merge/dedupe -------------------
 async function collectIOS(appId, pages=5, country='br') {
   let amp = [];
-  try { amp = await fetchAmpReviews(APP_ID, COUNTRY, LANG, 50, 0); }
+  try { amp = await fetchAmpReviews(appId, country, LANG, 50, 0); }
   catch (e) { console.log('AMP fail:', e?.message || e); }
 
   const rss = [];
@@ -217,7 +199,6 @@ async function collectIOS(appId, pages=5, country='br') {
   const sig = (r) => `${lown(r.author)}|${lown(r.text || r.title).slice(0,120)}|${(r.review_date||'').slice(0,10)}`;
   const bySig = new Map();
 
-  // Preferência: AMP/RSS (têm review_id) > HTML; injeta resposta do dev do HTML
   for (const r of [...amp, ...rss, ...html]) {
     const k = sig(r);
     if (!bySig.has(k)) { bySig.set(k, r); continue; }
@@ -243,7 +224,7 @@ async function run() {
   if (!rows.length) { console.log('Nothing to send.'); return; }
   const resp = await fetch(IMPORT_URL, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Bearer ${TOKEN}', 'Content-Type': 'application/json' },
     body: JSON.stringify(rows)
   });
   const data = await resp.json().catch(()=> ({}));
