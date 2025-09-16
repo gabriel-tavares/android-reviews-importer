@@ -67,38 +67,65 @@ async function getAppleWebConfig(appId, country = 'br', lang = 'pt-BR') {
 }
 
 // AMP JSON (mais recentes)
-async function fetchAmpReviews(appId, country='br', lang='pt-BR', limit=50, offset=0) {
-  const { widgetKey, storefrontId } = await getAppleWebConfig(appId, country, lang);
-  const url = `https://amp-api.apps.apple.com/v1/catalog/${country}/apps/${appId}/reviews?l=${encodeURIComponent(lang)}&platform=web&offset=${offset}&limit=${limit}&sort=mostRecent`;
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': UA,
-      'Accept': 'application/json',
-      'Origin': 'https://apps.apple.com',
-      'Referer': `https://apps.apple.com/${country}/app/id${appId}`,
-      'X-Apple-Widget-Key': widgetKey,
-      'X-Apple-Store-Front': storefrontId,
-      'Accept-Language': lang
+// Lê widgetKey + storefrontId do HTML (robusto a entidades, %encoding e variações)
+async function getAppleWebConfig(appId, country = 'br', lang = 'pt-BR') {
+  const url = `https://apps.apple.com/${country}/app/id${appId}`;
+  const res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': lang } });
+  const html = await res.text();
+
+  // 1) Tenta meta com qualquer ordem/aspas
+  const metaRe = /<meta[^>]+name=['"]web-experience-app\/config\/environment['"][^>]*>/i;
+  const mTag = html.match(metaRe);
+  let content = null;
+  if (mTag) {
+    const cMatch = mTag[0].match(/content=['"]([^'"]+)['"]/i);
+    if (cMatch) content = cMatch[1];
+  }
+
+  // 2) Normaliza entidades e %encoding
+  if (content) {
+    content = content
+      .replace(/&quot;/g, '"')
+      .replace(/&#x27;/g, "'")
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>');
+    if (/%7B|%7D|%22/i.test(content)) {
+      try { content = decodeURIComponent(content); } catch {}
     }
-  });
-  if (!res.ok) throw new Error(`AMP ${res.status}`);
-  const data = await res.json();
-  const arr = Array.isArray(data?.data) ? data.data : [];
-  return arr.map(x => {
-    const a = x?.attributes || {};
-    return {
-      platform: 'ios',
-      review_id: x?.id || null,
-      author: a.userName || a.user || null,
-      rating: a.rating != null ? Number(a.rating) : null,
-      title: a.title || null,
-      text: a.review || a.body || '',
-      review_date: a.date ? new Date(a.date).toISOString()
-               : (a.createdDate ? new Date(a.createdDate).toISOString() : null),
-      country, lang,
-      raw: { amp: true }
-    };
-  });
+    if ((content.startsWith('"') && content.endsWith('"')) ||
+        (content.startsWith("'") && content.endsWith("'"))) {
+      content = content.slice(1, -1);
+    }
+  }
+
+  // 3) Parse JSON (com fallback duplo caso esteja stringificado duas vezes)
+  let cfg = null;
+  if (content) {
+    try { cfg = JSON.parse(content); }
+    catch {
+      try { cfg = JSON.parse(JSON.parse(content)); } catch {}
+    }
+  }
+
+  // 4) Extrai dos campos conhecidos se o JSON deu certo
+  let widgetKey = cfg?.APP_STORE_DEFAULTS?.widgetKey ?? cfg?.widgetKey ?? null;
+  let storefrontId = cfg?.STORE_FRONT?.storefront ?? cfg?.storefrontId ?? cfg?.storefront ?? null;
+
+  // 5) Fallback brutal: varre o HTML por "widgetKey" e "storefront(Id)"
+  if (!widgetKey) {
+    const wm = html.match(/["']widgetKey["']\s*:\s*["']([^"']+)["']/i);
+    widgetKey = wm ? wm[1] : null;
+  }
+  if (!storefrontId) {
+    const sm = html.match(/["']storefront(?:Id)?["']\s*:\s*["']([^"']+)["']/i);
+    storefrontId = sm ? sm[1] : null;
+  }
+
+  if (!widgetKey && !storefrontId) {
+    throw new Error('widgetKey/storefrontId not found');
+  }
+  return { widgetKey, storefrontId };
 }
 
 // ------------------- RSS (fallback) -------------------
@@ -175,46 +202,52 @@ async function fetchHtmlSeeAllFull(appId, country='br') {
   return [...map.values()];
 }
 
-// ------------------- Coleta + merge/dedupe -------------------
-async function collectIOS(appId, pages=5, country='br') {
-  let amp = [];
-  try { amp = await fetchAmpReviews(appId, country, LANG, 50, 0); }
-  catch (e) { console.log('AMP fail:', e?.message || e); }
+// AMP JSON (mais recentes) — tenta com várias combinações de headers
+async function fetchAmpReviews(appId, country='br', lang='pt-BR', limit=50, offset=0) {
+  const { widgetKey, storefrontId } = await getAppleWebConfig(appId, country, lang);
+  const url = `https://amp-api.apps.apple.com/v1/catalog/${country}/apps/${appId}/reviews?l=${encodeURIComponent(lang)}&platform=web&offset=${offset}&limit=${limit}&sort=mostRecent`;
 
-  const rss = [];
-  for (let p=1; p<=pages; p++) {
-    try {
-      const pageRows = await fetchRssRecent(appId, p, country);
-      if (!pageRows.length) break;
-      rss.push(...pageRows);
-    } catch (e) {
-      if (p === 1) console.error('RSS error page 1:', e?.message || e);
-      break;
-    }
+  const base = {
+    'User-Agent': UA,
+    'Accept': 'application/json',
+    'Origin': 'https://apps.apple.com',
+    'Referer': `https://apps.apple.com/${country}/app/id${appId}`,
+    'Accept-Language': lang
+  };
+
+  // Tenta: (1) ambos, (2) só storefront, (3) só widget, (4) sem extras
+  const headerVariants = [];
+  if (widgetKey && storefrontId) headerVariants.push({ ...base, 'X-Apple-Widget-Key': widgetKey, 'X-Apple-Store-Front': storefrontId });
+  if (storefrontId)              headerVariants.push({ ...base, 'X-Apple-Store-Front': storefrontId });
+  if (widgetKey)                 headerVariants.push({ ...base, 'X-Apple-Widget-Key': widgetKey });
+  headerVariants.push({ ...base });
+
+  let lastErr = null, data = null;
+  for (const h of headerVariants) {
+    const r = await fetch(url, { headers: h });
+    if (r.ok) { data = await r.json(); break; }
+    lastErr = new Error(`AMP ${r.status}`);
+    // 401/403 -> tenta próximo header; outros códigos param
+    if (![401,403].includes(r.status)) break;
   }
+  if (!data) throw lastErr || new Error('AMP unknown error');
 
-  let html = [];
-  try { html = await fetchHtmlSeeAllFull(appId, country); } catch {}
-
-  const sig = (r) => `${lown(r.author)}|${lown(r.text || r.title).slice(0,120)}|${(r.review_date||'').slice(0,10)}`;
-  const bySig = new Map();
-
-  for (const r of [...amp, ...rss, ...html]) {
-    const k = sig(r);
-    if (!bySig.has(k)) { bySig.set(k, r); continue; }
-    const prev = bySig.get(k);
-    if (r.review_id && !prev.review_id) {
-      const merged = { ...r, raw: { ...(r.raw||{}), ...(prev.raw||{}) } };
-      bySig.set(k, merged);
-    } else if ((r.raw||{})._dev_response_text && !(prev.raw||{})._dev_response_text) {
-      prev.raw = prev.raw || {};
-      prev.raw._dev_response_text = r.raw._dev_response_text;
-    }
-  }
-
-  const merged = [...bySig.values()];
-  console.log(`iOS collected: amp=${amp.length} rss=${rss.length} html=${html.length} merged=${merged.length} country=${country}`);
-  return merged;
+  const arr = Array.isArray(data?.data) ? data.data : [];
+  return arr.map(x => {
+    const a = x?.attributes || {};
+    return {
+      platform: 'ios',
+      review_id: x?.id || null,
+      author: a.userName || a.user || null,
+      rating: a.rating != null ? Number(a.rating) : null,
+      title: a.title || null,
+      text: a.review || a.body || '',
+      review_date: a.date ? new Date(a.date).toISOString()
+               : (a.createdDate ? new Date(a.createdDate).toISOString() : null),
+      country, lang,
+      raw: { amp: true }
+    };
+  });
 }
 
 // ------------------- Execução -------------------
