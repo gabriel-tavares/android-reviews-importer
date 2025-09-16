@@ -224,7 +224,10 @@ async function run() {
   if (!rows.length) { console.log('Nothing to send.'); return; }
   const resp = await fetch(IMPORT_URL, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${TOKEN}', 'Content-Type': 'application/json' },
+    headers: {
+      'Authorization': `Bearer ${TOKEN}`,
+      'Content-Type': 'application/json'
+    },
     body: JSON.stringify(rows)
   });
   const data = await resp.json().catch(()=> ({}));
