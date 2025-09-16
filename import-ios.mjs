@@ -17,7 +17,6 @@ const normISO = (v) => {
 
 function mapToWorkerPayload(items) {
   return items.map(r => {
-    // App Store lib às vezes não traz r.date, mas traz r.updated; forçamos review_date
     const dt = r.date || r.updated || r.reviewDate || r.dateISO;
     return {
       review_id: r.id,
@@ -26,11 +25,9 @@ function mapToWorkerPayload(items) {
       text: r.text,
       rating: r.score,
       review_date: normISO(dt) || normISO(Date.now()),
-      // resposta do dev (quando existir)
       developer_response_text: r.developerResponse?.text || null,
       developer_response_at: r.developerResponse?.lastModified || null,
-      // reduzimos o RAW para evitar payload grande no Worker
-      raw: { id: r.id, version: r.version, updated: r.updated || dt }
+      raw: { id: r.id, version: r.version, updated: r.updated || dt } // RAW enxuto
     };
   });
 }
