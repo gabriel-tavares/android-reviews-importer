@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "axios": "^1.7.4",
-    "google-play-scraper": "^10.4.0",
-    "app-store-scraper": "^0.18.0",
-    "dotenv": "^16.4.5"
+    "axios": "latest",
+    "google-play-scraper": "latest",
+    "app-store-scraper": "latest",
+    "dotenv": "latest"
   }
 }
