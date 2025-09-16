@@ -10,11 +10,7 @@ if (!WORKER_URL || !TOKEN) {
   process.exit(1);
 }
 
-const normISO = (v) => {
-  if (!v) return null;
-  try { return new Date(v).toISOString(); } catch (_) { return null; }
-};
-
+const normISO = v => { try { return v ? new Date(v).toISOString() : null; } catch { return null; } };
 function mapToWorkerPayload(items) {
   return items.map(r => {
     const dt = r.date || r.updated || r.reviewDate || r.dateISO;
@@ -27,7 +23,7 @@ function mapToWorkerPayload(items) {
       review_date: normISO(dt) || normISO(Date.now()),
       developer_response_text: r.developerResponse?.text || null,
       developer_response_at: r.developerResponse?.lastModified || null,
-      raw: { id: r.id, version: r.version, updated: r.updated || dt } // RAW enxuto
+      raw: { id: r.id, version: r.version, updated: r.updated || dt }
     };
   });
 }
